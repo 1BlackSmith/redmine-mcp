@@ -1,0 +1,33 @@
+{
+  "name": "redmine-mcp",
+  "version": "0.1.0",
+  "description": "Generic Redmine MCP provider for REST API access from Codex, OpenCode, and other MCP clients.",
+  "type": "module",
+  "main": "./src/server.js",
+  "exports": {
+    ".": "./src/server.js"
+  },
+  "bin": {
+    "redmine-mcp": "./src/server.js"
+  },
+  "files": [
+    "src",
+    "examples",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node ./src/server.js",
+    "check": "node --check ./src/server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "redmine",
+    "codex",
+    "opencode"
+  ],
+  "license": "MIT"
+}
