@@ -1,6 +1,6 @@
 [mcp_servers.redmine]
-command = "npx"
-args = ["-y", "redmine-mcp"]
+command = "redmine-mcp"
+args = []
 
 [mcp_servers.redmine.env]
 REDMINE_URL = "https://redmine.example.com"

@@ -3,7 +3,7 @@
   "mcp": {
     "redmine": {
       "type": "local",
-      "command": ["npx", "-y", "redmine-mcp"],
+      "command": ["redmine-mcp"],
       "environment": {
         "REDMINE_URL": "https://redmine.example.com",
         "REDMINE_API_KEY": "your-api-key"
