@@ -1,6 +1,6 @@
 [mcp_servers.redmine]
 command = "redmine-mcp"
-args = []
+args = ["--deny-action", "delete", "--tool", "redmine_time_entries:list,get,create"]
 
 [mcp_servers.redmine.env]
 REDMINE_URL = "https://redmine.example.com"

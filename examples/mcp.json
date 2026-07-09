@@ -2,7 +2,12 @@
   "mcpServers": {
     "redmine": {
       "command": "redmine-mcp",
-      "args": ["--deny-action", "delete"],
+      "args": [
+        "--deny-action",
+        "delete",
+        "--tool",
+        "redmine_time_entries:list,get,create"
+      ],
       "env": {
         "REDMINE_URL": "https://redmine.example.com",
         "REDMINE_API_KEY": "your-api-key"

@@ -108,7 +108,41 @@ node /absolute/path/to/redmine-mcp/src/server.js
 
 `--tool` можно повторять. Формат значения: `tool_name` или `tool_name:action,action`. Если `--tool` не указан, доступны все tools, кроме actions/methods, запрещённых через `--deny-action`.
 
+Например, чтобы оставить только просмотр и создание списаний трудозатрат:
+
+```json
+["--deny-action", "delete", "--tool", "redmine_time_entries:list,get,create"]
+```
+
+В OpenCode эти аргументы нужно добавлять в `command`, а не в отдельное поле `args`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "redmine": {
+      "type": "local",
+      "command": [
+        "redmine-mcp",
+        "--deny-action",
+        "delete",
+        "--tool",
+        "redmine_time_entries:list,get,create"
+      ],
+      "environment": {
+        "REDMINE_URL": "https://redmine.example.com",
+        "REDMINE_API_KEY": "your-api-key"
+      },
+      "enabled": true,
+      "timeout": 30000
+    }
+  }
+}
+```
+
 `--deny-action` тоже можно повторять. Формат значения: `action` для глобального запрета или `tool_name:action,action` для запрета внутри конкретного tool.
+
+Поддерживаются оба CLI-формата: `["--deny-action", "delete"]` и `["--deny-action=delete"]`. Если MCP-клиент передаёт флаг одним аргументом, `["--deny-action delete"]` тоже будет разобран.
 
 Ограничение применяется и к `tools/list`, и к `tools/call`: скрытый tool/action не будет показан клиенту и не сможет быть вызван напрямую.
 

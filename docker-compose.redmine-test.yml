@@ -1,0 +1,51 @@
+name: redmine-mcp-test
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: redmine-mcp-test-db
+    network_mode: bridge
+    environment:
+      POSTGRES_DB: redmine
+      POSTGRES_USER: redmine
+      POSTGRES_PASSWORD: redmine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redmine -d redmine"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - redmine-test-db:/var/lib/postgresql/data
+
+  redmine:
+    image: redmine:5.1
+    container_name: redmine-mcp-test-redmine
+    network_mode: bridge
+    depends_on:
+      db:
+        condition: service_healthy
+    links:
+      - db:postgres
+    environment:
+      REDMINE_DB_POSTGRES: postgres
+      REDMINE_DB_DATABASE: redmine
+      REDMINE_DB_USERNAME: redmine
+      REDMINE_DB_PASSWORD: redmine
+      REDMINE_SECRET_KEY_BASE: redmine-mcp-test-secret-key-base
+    ports:
+      - "${REDMINE_TEST_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ruby -rnet/http -e 'response = Net::HTTP.get_response(URI(\"http://127.0.0.1:3000/\")); exit(response.code.to_i < 500 ? 0 : 1)'",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+    volumes:
+      - redmine-test-files:/usr/src/redmine/files
+
+volumes:
+  redmine-test-db:
+  redmine-test-files:

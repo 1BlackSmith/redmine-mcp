@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const PROTOCOL_VERSION = "2024-11-05";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.2";
 const JSON_RPC_VERSION = "2.0";
 const MAX_BODY_PREVIEW_CHARS = 30000;
 const DEFAULT_LIMIT = 100;
@@ -23,6 +23,10 @@ const ACTION_HTTP_METHODS_BY_TOOL = {
   redmine_issue_watchers: {
     add: "POST",
     remove: "DELETE",
+  },
+  redmine_issue_journals: {
+    update: "PUT",
+    delete: "PUT",
   },
   redmine_projects: {
     list: "GET",
@@ -291,6 +295,14 @@ const tools = [
   ], {
     issue_id: idSchema,
     user_id: idSchema,
+  }),
+  resourceTool("redmine_issue_journals", "Manage issue journal notes: update, delete.", [
+    "update",
+    "delete",
+  ], {
+    journal_id: idSchema,
+    journal: anyJsonObjectSchema,
+    notes: { type: "string" },
   }),
   resourceTool("redmine_projects", "Manage projects: list, get, create, update, delete, archive, unarchive.", [
     "list",
@@ -649,6 +661,8 @@ async function callTool(params) {
       return toolResult(await issueRelations(args));
     case "redmine_issue_watchers":
       return toolResult(await issueWatchers(args));
+    case "redmine_issue_journals":
+      return toolResult(await issueJournals(args));
     case "redmine_projects":
       return toolResult(await projects(args));
     case "redmine_memberships":
@@ -855,35 +869,63 @@ function parseToolAccessArgs(args) {
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
-    if (arg === "--tool" || arg === "--allow-tool") {
-      addToolSpecs(config, args[i + 1] || "");
-      i += 1;
+
+    let parsed = parseOptionArg(args, i, "--tool");
+    if (!parsed.matched) parsed = parseOptionArg(args, i, "--allow-tool");
+    if (parsed.matched) {
+      addToolSpecs(config, parsed.value);
+      i = parsed.nextIndex;
       continue;
     }
-    if (arg.startsWith("--tool=")) {
-      addToolSpecs(config, arg.slice("--tool=".length));
-      continue;
-    }
-    if (arg.startsWith("--allow-tool=")) {
-      addToolSpecs(config, arg.slice("--allow-tool=".length));
-      continue;
-    }
-    if (arg === "--deny-action" || arg === "--deny-method") {
-      addDeniedOperationSpecs(config, args[i + 1] || "");
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--deny-action=")) {
-      addDeniedOperationSpecs(config, arg.slice("--deny-action=".length));
-      continue;
-    }
-    if (arg.startsWith("--deny-method=")) {
-      addDeniedOperationSpecs(config, arg.slice("--deny-method=".length));
+
+    parsed = parseOptionArg(args, i, "--deny-action");
+    if (!parsed.matched) parsed = parseOptionArg(args, i, "--deny-method");
+    if (parsed.matched) {
+      addDeniedOperationSpecs(config, parsed.value);
+      i = parsed.nextIndex;
       continue;
     }
   }
 
   return config;
+}
+
+function parseOptionArg(args, index, optionName) {
+  const arg = args[index];
+  if (arg === optionName) {
+    return {
+      matched: true,
+      value: requiredOptionValue(args[index + 1], optionName),
+      nextIndex: index + 1,
+    };
+  }
+
+  const equalsPrefix = `${optionName}=`;
+  if (arg.startsWith(equalsPrefix)) {
+    return {
+      matched: true,
+      value: requiredOptionValue(arg.slice(equalsPrefix.length), optionName),
+      nextIndex: index,
+    };
+  }
+
+  const spacePrefix = `${optionName} `;
+  if (arg.startsWith(spacePrefix)) {
+    return {
+      matched: true,
+      value: requiredOptionValue(arg.slice(spacePrefix.length), optionName),
+      nextIndex: index,
+    };
+  }
+
+  return { matched: false };
+}
+
+function requiredOptionValue(value, optionName) {
+  if (typeof value !== "string" || value.trim() === "" || value.trim().startsWith("--")) {
+    throw rpcError(-32602, `${optionName} requires a value`);
+  }
+  return value.trim();
 }
 
 function addToolSpecs(config, value) {
@@ -1193,6 +1235,21 @@ async function issueWatchers(args) {
       return rest("POST", `/issues/${encodePathId(args.issue_id)}/watchers.json`, undefined, { user_id: requiredId(args.user_id, "user_id") });
     case "remove":
       return rest("DELETE", `/issues/${encodePathId(args.issue_id)}/watchers/${encodePathId(args.user_id)}.json`);
+  }
+}
+
+async function issueJournals(args) {
+  switch (requiredAction(args, "redmine_issue_journals")) {
+    case "update":
+      return rest("PUT", `/journals/${encodePathId(args.journal_id)}.json`, undefined, {
+        journal: args.journal !== undefined
+          ? requiredObject(args.journal, "journal")
+          : { notes: requiredString(args.notes, "notes") },
+      });
+    case "delete":
+      return rest("PUT", `/journals/${encodePathId(args.journal_id)}.json`, undefined, {
+        journal: { notes: "" },
+      });
   }
 }
 

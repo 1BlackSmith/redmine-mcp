@@ -3,7 +3,13 @@
   "mcp": {
     "redmine": {
       "type": "local",
-      "command": ["redmine-mcp"],
+      "command": [
+        "redmine-mcp",
+        "--deny-action",
+        "delete",
+        "--tool",
+        "redmine_time_entries:list,get,create"
+      ],
       "environment": {
         "REDMINE_URL": "https://redmine.example.com",
         "REDMINE_API_KEY": "your-api-key"
