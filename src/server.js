@@ -6,6 +6,121 @@ const JSON_RPC_VERSION = "2.0";
 const MAX_BODY_PREVIEW_CHARS = 30000;
 const DEFAULT_LIMIT = 100;
 const DEFAULT_MAX_PAGES = 10;
+const ACTION_HTTP_METHODS_BY_TOOL = {
+  redmine_issues: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    add_note: "PUT",
+    delete: "DELETE",
+  },
+  redmine_issue_relations: {
+    list: "GET",
+    create: "POST",
+    delete: "DELETE",
+  },
+  redmine_issue_watchers: {
+    add: "POST",
+    remove: "DELETE",
+  },
+  redmine_projects: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+    archive: "PUT",
+    unarchive: "PUT",
+  },
+  redmine_memberships: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+  },
+  redmine_versions: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+  },
+  redmine_time_entries: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+  },
+  redmine_users: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+  },
+  redmine_groups: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+    add_user: "POST",
+    remove_user: "DELETE",
+  },
+  redmine_roles: {
+    list: "GET",
+    get: "GET",
+  },
+  redmine_trackers: {
+    list: "GET",
+  },
+  redmine_issue_statuses: {
+    list: "GET",
+  },
+  redmine_enumerations: {
+    list: "GET",
+  },
+  redmine_custom_fields: {
+    list: "GET",
+  },
+  redmine_queries: {
+    list: "GET",
+  },
+  redmine_wiki: {
+    list: "GET",
+    get: "GET",
+    update: "PUT",
+    delete: "DELETE",
+  },
+  redmine_documents: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    delete: "DELETE",
+  },
+  redmine_files: {
+    list: "GET",
+    create: "POST",
+  },
+  redmine_news: {
+    list: "GET",
+    get: "GET",
+  },
+  redmine_attachments: {
+    get: "GET",
+    delete: "DELETE",
+  },
+  redmine_issue_categories: {
+    list: "GET",
+    get: "GET",
+    create: "POST",
+    update: "PUT",
+    delete: "DELETE",
+  },
+};
 
 const anyJsonObjectSchema = {
   type: "object",
@@ -316,6 +431,9 @@ const tools = [
   }),
 ];
 
+let toolAccessCache;
+const toolAccessConfig = parseToolAccessArgs(process.argv.slice(2));
+
 process.stdin.on("data", (chunk) => {
   state.buffer = Buffer.concat([state.buffer, chunk]);
   processMessages();
@@ -501,7 +619,7 @@ async function routeRequest(message) {
     case "ping":
       return {};
     case "tools/list":
-      return { tools };
+      return { tools: getToolAccess().tools };
     case "tools/call":
       return callTool(message.params || {});
     default:
@@ -512,6 +630,7 @@ async function routeRequest(message) {
 async function callTool(params) {
   const name = params.name;
   const args = params.arguments || {};
+  ensureToolEnabled(name, args);
 
   switch (name) {
     case "redmine_api_request":
@@ -573,6 +692,333 @@ async function callTool(params) {
     default:
       throw rpcError(-32602, `Unknown tool: ${name}`);
   }
+}
+
+function getToolAccess() {
+  if (toolAccessCache) return toolAccessCache;
+
+  const knownNames = new Set(tools.map((tool) => tool.name));
+  const operationProperties = new Map();
+  const availableTools = [];
+  const names = new Set();
+  const operationsByTool = new Map();
+
+  for (const tool of tools) {
+    const operationProperty = getOperationProperty(tool);
+    if (operationProperty) operationProperties.set(tool.name, operationProperty);
+  }
+
+  validateToolAccessConfig(toolAccessConfig, knownNames, operationProperties);
+
+  for (const tool of tools) {
+    const operationProperty = operationProperties.get(tool.name);
+    const operations = getAllowedOperations(tool.name, operationProperty);
+    if (operations === false) continue;
+
+    const visibleTool = operationProperty
+      ? toolWithOperations(tool, operationProperty.propertyName, operations)
+      : tool;
+    if (!visibleTool) continue;
+
+    availableTools.push(visibleTool);
+    names.add(tool.name);
+    if (operationProperty) {
+      operationsByTool.set(tool.name, {
+        propertyName: operationProperty.propertyName,
+        values: new Set(operations),
+      });
+    }
+  }
+
+  toolAccessCache = {
+    tools: availableTools,
+    names,
+    knownNames,
+    operationsByTool,
+  };
+  return toolAccessCache;
+}
+
+function ensureToolEnabled(name, args) {
+  const access = getToolAccess();
+  if (access.names.has(name)) {
+    ensureOperationEnabled(name, args, access.operationsByTool.get(name));
+    return;
+  }
+  if (access.knownNames.has(name)) {
+    throw rpcError(-32602, `Tool is not enabled by MCP server config: ${name}`);
+  }
+  throw rpcError(-32602, `Unknown tool: ${name}`);
+}
+
+function ensureOperationEnabled(toolName, args, operationConfig) {
+  if (!operationConfig) return;
+  const value = args[operationConfig.propertyName];
+  if (typeof value !== "string" || value.trim() === "") return;
+  const normalized = value.trim().toLowerCase();
+  const allowed = [...operationConfig.values].some((operation) => {
+    return operation.toLowerCase() === normalized;
+  });
+  if (!allowed) {
+    throw rpcError(
+      -32602,
+      `${toolName}.${operationConfig.propertyName} is not enabled by MCP server config: ${value}`
+    );
+  }
+}
+
+function getAllowedOperations(toolName, operationProperty) {
+  if (toolAccessConfig.tools) {
+    const allowedByTool = toolAccessConfig.tools.get(toolName);
+    if (!allowedByTool) return false;
+    if (!operationProperty) {
+      return allowedByTool.operations === undefined
+        ? undefined
+        : invalidToolOperationConfig(toolName);
+    }
+
+    const requestedOperations = allowedByTool.operations === undefined
+      ? operationProperty.values
+      : allowedByTool.operations;
+    return filterDeniedOperations(toolName, operationProperty.values, requestedOperations);
+  }
+
+  if (!operationProperty) return undefined;
+  return filterDeniedOperations(toolName, operationProperty.values, operationProperty.values);
+}
+
+function filterDeniedOperations(toolName, knownOperations, requestedOperations) {
+  const canonicalRequested = canonicalOperations(knownOperations, requestedOperations, toolName);
+  const denied = [
+    ...toolAccessConfig.deniedOperations,
+    ...(toolAccessConfig.deniedOperationsByTool.get(toolName) || []),
+  ];
+  if (denied.length === 0) return canonicalRequested;
+
+  return canonicalRequested.filter((operation) => {
+    return !denied.some((deniedOperation) => operationMatchesDeniedValue(
+      toolName,
+      operation,
+      deniedOperation
+    ));
+  });
+}
+
+function toolWithOperations(tool, propertyName, operations) {
+  if (operations.length === 0) return undefined;
+
+  const currentOperations = tool.inputSchema.properties[propertyName].enum;
+  if (sameOperationList(currentOperations, operations)) return tool;
+
+  return {
+    ...tool,
+    description: propertyName === "action"
+      ? descriptionWithActions(tool.description, operations)
+      : tool.description,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...tool.inputSchema.properties,
+        [propertyName]: {
+          ...tool.inputSchema.properties[propertyName],
+          enum: operations,
+        },
+      },
+    },
+  };
+}
+
+function descriptionWithActions(description, actions) {
+  const separator = description.indexOf(":");
+  if (separator === -1) return description;
+  return `${description.slice(0, separator)}: ${actions.join(", ")}.`;
+}
+
+function getOperationProperty(tool) {
+  for (const propertyName of ["action", "method"]) {
+    const property = tool.inputSchema && tool.inputSchema.properties
+      ? tool.inputSchema.properties[propertyName]
+      : undefined;
+    if (property && Array.isArray(property.enum)) {
+      return { propertyName, values: property.enum };
+    }
+  }
+  return undefined;
+}
+
+function parseToolAccessArgs(args) {
+  const config = {
+    tools: undefined,
+    deniedOperations: [],
+    deniedOperationsByTool: new Map(),
+  };
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--tool" || arg === "--allow-tool") {
+      addToolSpecs(config, args[i + 1] || "");
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--tool=")) {
+      addToolSpecs(config, arg.slice("--tool=".length));
+      continue;
+    }
+    if (arg.startsWith("--allow-tool=")) {
+      addToolSpecs(config, arg.slice("--allow-tool=".length));
+      continue;
+    }
+    if (arg === "--deny-action" || arg === "--deny-method") {
+      addDeniedOperationSpecs(config, args[i + 1] || "");
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--deny-action=")) {
+      addDeniedOperationSpecs(config, arg.slice("--deny-action=".length));
+      continue;
+    }
+    if (arg.startsWith("--deny-method=")) {
+      addDeniedOperationSpecs(config, arg.slice("--deny-method=".length));
+      continue;
+    }
+  }
+
+  return config;
+}
+
+function addToolSpecs(config, value) {
+  for (const spec of splitSpecs(value)) {
+    const parsed = parseToolSpec(spec);
+    if (!config.tools) config.tools = new Map();
+    config.tools.set(parsed.toolName, {
+      operations: parsed.operations,
+    });
+  }
+}
+
+function addDeniedOperationSpecs(config, value) {
+  for (const spec of splitSpecs(value)) {
+    const parsed = parseToolSpec(spec);
+    if (parsed.operations === undefined) {
+      config.deniedOperations.push(...splitOperationList(parsed.toolName));
+      continue;
+    }
+    const denied = config.deniedOperationsByTool.get(parsed.toolName) || [];
+    denied.push(...parsed.operations);
+    config.deniedOperationsByTool.set(parsed.toolName, denied);
+  }
+}
+
+function splitSpecs(value) {
+  return String(value)
+    .split(";")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseToolSpec(spec) {
+  const separator = spec.indexOf(":");
+  if (separator === -1) {
+    return { toolName: spec.trim(), operations: undefined };
+  }
+  const toolName = spec.slice(0, separator).trim();
+  const operations = splitOperationList(spec.slice(separator + 1));
+  return { toolName, operations };
+}
+
+function splitOperationList(value) {
+  return String(value)
+    .split(",")
+    .map((operation) => operation.trim())
+    .filter(Boolean);
+}
+
+function validateToolAccessConfig(config, knownNames, operationProperties) {
+  if (config.tools) {
+    for (const [toolName, entry] of config.tools) {
+      ensureKnownToolName(toolName, knownNames);
+      if (entry.operations !== undefined) {
+        const operationProperty = operationProperties.get(toolName);
+        if (!operationProperty) invalidToolOperationConfig(toolName);
+        canonicalOperations(operationProperty.values, entry.operations, toolName);
+      }
+    }
+  }
+
+  for (const toolName of config.deniedOperationsByTool.keys()) {
+    ensureKnownToolName(toolName, knownNames);
+    const operationProperty = operationProperties.get(toolName);
+    if (!operationProperty) invalidToolOperationConfig(toolName);
+    canonicalOperations(
+      operationProperty.values,
+      config.deniedOperationsByTool.get(toolName),
+      toolName
+    );
+  }
+
+  for (const deniedOperation of config.deniedOperations) {
+    const matchesKnownOperation = [...operationProperties.values()].some((operationProperty) => {
+      return operationProperty.values.some((operation) => sameOperation(operation, deniedOperation));
+    });
+    if (!matchesKnownOperation) {
+      throw rpcError(-32602, `Unknown action/method in MCP server config: ${deniedOperation}`);
+    }
+  }
+}
+
+function operationMatchesDeniedValue(toolName, operation, deniedOperation) {
+  if (sameOperation(operation, deniedOperation)) return true;
+  const method = actionHttpMethod(toolName, operation);
+  return method ? sameOperation(method, deniedOperation) : false;
+}
+
+function actionHttpMethod(toolName, action) {
+  return ACTION_HTTP_METHODS_BY_TOOL[toolName]
+    ? ACTION_HTTP_METHODS_BY_TOOL[toolName][action]
+    : undefined;
+}
+
+function ensureKnownToolName(toolName, knownNames) {
+  if (!knownNames.has(toolName)) {
+    throw rpcError(-32602, `Unknown tool in MCP server config: ${toolName}`);
+  }
+}
+
+function canonicalOperations(knownOperations, operations, toolName) {
+  return uniqueOperationNames(operations).map((operation) => {
+    const canonical = knownOperations.find((knownOperation) => {
+      return sameOperation(knownOperation, operation);
+    });
+    if (!canonical) {
+      throw rpcError(-32602, `Unknown action/method for ${toolName}: ${operation}`);
+    }
+    return canonical;
+  });
+}
+
+function uniqueOperationNames(operations) {
+  const result = [];
+  const seen = new Set();
+  for (const operation of operations) {
+    const key = String(operation).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(String(operation));
+  }
+  return result;
+}
+
+function sameOperation(left, right) {
+  return String(left).toLowerCase() === String(right).toLowerCase();
+}
+
+function sameOperationList(left, right) {
+  if (left.length !== right.length) return false;
+  return left.every((operation, index) => operation === right[index]);
+}
+
+function invalidToolOperationConfig(toolName) {
+  throw rpcError(-32602, `${toolName} does not have action/method values to filter`);
 }
 
 function objectSchema(properties, required = []) {
@@ -1044,6 +1490,8 @@ function requiredObject(value, name) {
 }
 
 async function fetchRedmine(url, options) {
+  ensureHttpMethodEnabled(options.method);
+
   const headers = {
     Accept: "application/json",
     "User-Agent": `redmine-mcp/${SERVER_VERSION}`,
@@ -1069,6 +1517,16 @@ async function fetchRedmine(url, options) {
   }
 
   return fetch(url, init);
+}
+
+function ensureHttpMethodEnabled(method) {
+  if (!method) return;
+  const denied = toolAccessConfig.deniedOperations.some((operation) => {
+    return sameOperation(method, operation);
+  });
+  if (denied) {
+    throw rpcError(-32602, `HTTP method is not enabled by MCP server config: ${method}`);
+  }
 }
 
 async function formatResponse(response) {

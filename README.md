@@ -59,6 +59,59 @@ node /absolute/path/to/redmine-mcp/src/server.js
 - `REDMINE_TOKEN` или `REDMINE_ACCESS_TOKEN` — алиасы для API key.
 - `REDMINE_USERNAME` и `REDMINE_PASSWORD` — fallback для HTTP Basic auth, если API key недоступен.
 
+## Ограничение доступных tools и actions
+
+По умолчанию MCP-сервер публикует все tools и все actions внутри resource tools. Ограничения задаются аргументами команды в `mcp.json`.
+
+Запретить все `delete` actions:
+
+```json
+{
+  "mcpServers": {
+    "redmine": {
+      "command": "redmine-mcp",
+      "args": ["--deny-action", "delete"],
+      "env": {
+        "REDMINE_URL": "https://redmine.example.com",
+        "REDMINE_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+В этом режиме из схем исчезнут все actions, которые выполняют HTTP `DELETE`, включая actions с другими именами, например `remove` и `remove_user`. Прямой вызов таких actions будет отклонён, а в `redmine_api_request` будет скрыт и заблокирован HTTP method `DELETE`.
+
+Оставить только выбранные blocks/tools и actions внутри них:
+
+```json
+{
+  "mcpServers": {
+    "redmine": {
+      "command": "redmine-mcp",
+      "args": [
+        "--tool",
+        "redmine_current_user",
+        "--tool",
+        "redmine_issues:list,get,create,update,add_note",
+        "--tool",
+        "redmine_projects:list,get"
+      ],
+      "env": {
+        "REDMINE_URL": "https://redmine.example.com",
+        "REDMINE_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+`--tool` можно повторять. Формат значения: `tool_name` или `tool_name:action,action`. Если `--tool` не указан, доступны все tools, кроме actions/methods, запрещённых через `--deny-action`.
+
+`--deny-action` тоже можно повторять. Формат значения: `action` для глобального запрета или `tool_name:action,action` для запрета внутри конкретного tool.
+
+Ограничение применяется и к `tools/list`, и к `tools/call`: скрытый tool/action не будет показан клиенту и не сможет быть вызван напрямую.
+
 ## Настройка OpenCode
 
 OpenCode использует секцию `mcp`, а не `mcpServers`. Для локального MCP-сервера нужны:

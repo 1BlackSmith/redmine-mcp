@@ -1,6 +1,6 @@
 {
   "name": "@pavelsmith/redmine-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Generic Redmine MCP provider for REST API access from Codex, OpenCode, and other MCP clients.",
   "type": "module",
   "main": "./src/server.js",
